@@ -534,7 +534,8 @@ local HttpService = game:GetService("HttpService")
 local ESP_PORT = 27015
 local ESP_WS_PORT = ESP_PORT + 1
 local ESP_UPDATE_INTERVAL = 0.1 -- 100ms (~10 updates/sec)
-local ESP_EXE_PATH = os.getenv("LOCALAPPDATA") .. "\\RogueLiteESP\\esp_overlay.exe"
+local LOCAL_APP_DATA = type(os.getenv) == "function" and os.getenv("LOCALAPPDATA") or ""
+local ESP_EXE_PATH = LOCAL_APP_DATA ~= "" and (LOCAL_APP_DATA .. "\\RogueLiteESP\\esp_overlay.exe") or ""
 
 -- Resolve rogue in-game name for a player by checking leaderboard labels
 -- labelPlayerMap is defined in the SPECTATE section above
@@ -556,6 +557,12 @@ end
 
 -- Try to auto-launch the overlay .exe if it's not already running
 local function tryLaunchOverlay()
+    if ESP_EXE_PATH == "" then
+        print("[RogueLite] ESP overlay auto-launch skipped (os.getenv not available in this executor).")
+        print("[RogueLite] Please manually run esp_overlay.exe before or after injecting this script.")
+        return false
+    end
+
     -- Check if the exe exists
     local file = io.open(ESP_EXE_PATH, "r")
     if not file then
