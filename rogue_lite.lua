@@ -25,7 +25,7 @@
 -- If you load this script via a URL (e.g., loadstring(game:HttpGet("..."))()),
 -- paste that URL here so the script can automatically reload when you serverhop!
 -- If you put this script in your executor's 'autoexec' folder, you can leave this blank.
-local LOAD_URL = "" 
+local LOAD_URL = "https://raw.githubusercontent.com/lincoln1155/rogue-script/refs/heads/main/rogue_lite.lua" 
 
 -- ============================================================
 -- INITIALIZATION
