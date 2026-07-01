@@ -533,7 +533,7 @@ local HttpService = game:GetService("HttpService")
 
 local ESP_PORT = 27015
 local ESP_WS_PORT = ESP_PORT + 1
-local ESP_UPDATE_INTERVAL = 0.1 -- 100ms (~10 updates/sec)
+local ESP_UPDATE_INTERVAL = 0.05 -- 50ms (~20 updates/sec)
 local LOCAL_APP_DATA = type(os.getenv) == "function" and os.getenv("LOCALAPPDATA") or ""
 local ESP_EXE_PATH = LOCAL_APP_DATA ~= "" and (LOCAL_APP_DATA .. "\\RogueLiteESP\\esp_overlay.exe") or ""
 

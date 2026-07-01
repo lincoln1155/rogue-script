@@ -53,16 +53,16 @@ TRANSPARENT_COLOR = (1, 1, 1)  # Color key for transparency (near-black, invisib
 DEFAULT_VIEWPORT = (1920, 1080)
 
 # Proximity fade settings
-FADE_START_DIST = 50.0   # Start fading at this distance (studs)
+FADE_START_DIST = 200.0   # Start fading down when closer than this (studs)
 FADE_MIN_OPACITY = 0.20  # Minimum opacity at 0 distance
+FADE_FAR_DIST = 3000.0   # Start fading out when farther than this
 
 # Rendering settings
-DOT_RADIUS = 5
 HEALTH_BAR_WIDTH = 40
 HEALTH_BAR_HEIGHT = 4
-NAME_OFFSET_Y = -18       # Above the dot
-HEALTH_BAR_OFFSET_Y = 12  # Below the dot
-DISTANCE_OFFSET_Y = 20    # Below the health bar
+NAME_OFFSET_Y = -5        # Above the health bar
+HEALTH_BAR_OFFSET_Y = 0   # Base offset
+DISTANCE_OFFSET_Y = 8     # Below the health bar
 
 # Colors
 COLOR_DOT = (255, 255, 255)
@@ -304,14 +304,19 @@ def lerp_color(c1, c2, t):
 def get_opacity(dist):
     """
     Calculate opacity based on distance.
-    At > FADE_START_DIST: fully opaque (1.0)
-    At 0: FADE_MIN_OPACITY
-    Linear interpolation between.
+    At < FADE_START_DIST: fades down to FADE_MIN_OPACITY
+    At > FADE_FAR_DIST: fades down to FADE_MIN_OPACITY
+    Between: fully opaque (1.0)
     """
-    if dist >= FADE_START_DIST:
-        return 1.0
-    t = dist / FADE_START_DIST
-    return FADE_MIN_OPACITY + (1.0 - FADE_MIN_OPACITY) * t
+    if dist < FADE_START_DIST:
+        t = dist / FADE_START_DIST
+        return FADE_MIN_OPACITY + (1.0 - FADE_MIN_OPACITY) * t
+    elif dist > FADE_FAR_DIST:
+        t = (dist - FADE_FAR_DIST) / 1000.0 # Fade out over 1000 studs
+        t = min(1.0, max(0.0, t))
+        return 1.0 - (1.0 - FADE_MIN_OPACITY) * t
+    
+    return 1.0
 
 
 def apply_opacity(color, opacity):
@@ -324,40 +329,51 @@ def apply_opacity(color, opacity):
 
 
 def draw_esp_marker(surface, font, x, y, name, hp, dist, opacity):
-    """Draw a single ESP marker (dot + name + health bar + distance)."""
+    """Draw a single ESP marker (name + health bar + distance)."""
     ix, iy = int(x), int(y)
 
-    # --- Dot ---
-    dot_color = apply_opacity(COLOR_DOT, opacity)
-    pygame.draw.circle(surface, dot_color, (ix, iy), DOT_RADIUS)
+    # Calculate dynamic scale
+    # Smaller when close (<200) and smaller when far (>1000)
+    scale = 1.0
+    if dist < FADE_START_DIST:
+        scale = 0.5 + 0.5 * (dist / FADE_START_DIST)
+    elif dist > 1000.0:
+        scale = max(0.4, 1.0 - (dist - 1000.0) / 4000.0)
+
+    font_size = max(8, int(12 * scale))
+    bar_width = max(10, int(HEALTH_BAR_WIDTH * scale))
+    bar_height = max(2, int(HEALTH_BAR_HEIGHT * scale))
+    
+    name_off = int(NAME_OFFSET_Y * scale)
+    dist_off = int(DISTANCE_OFFSET_Y * scale)
 
     # --- Name ---
     name_color = apply_opacity(COLOR_NAME, opacity)
-    name_surf, name_rect = font.render(name, name_color)
+    name_surf, name_rect = font.render(name, name_color, size=font_size)
     name_x = ix - name_rect.width // 2
-    name_y = iy + NAME_OFFSET_Y - name_rect.height
+    name_y = iy + name_off - name_rect.height
     surface.blit(name_surf, (name_x, name_y))
 
     # --- Health bar ---
-    bar_x = ix - HEALTH_BAR_WIDTH // 2
+    bar_x = ix - bar_width // 2
     bar_y = iy + HEALTH_BAR_OFFSET_Y
 
     # Background
     bg_color = apply_opacity(COLOR_HEALTH_BG, opacity)
-    pygame.draw.rect(surface, bg_color, (bar_x, bar_y, HEALTH_BAR_WIDTH, HEALTH_BAR_HEIGHT))
+    pygame.draw.rect(surface, bg_color, (bar_x, bar_y, bar_width, bar_height))
 
     # Filled portion
     hp_clamped = max(0.0, min(1.0, hp))
-    fill_w = int(HEALTH_BAR_WIDTH * hp_clamped)
+    fill_w = int(bar_width * hp_clamped)
     if fill_w > 0:
         hp_color = lerp_color(COLOR_HEALTH_EMPTY, COLOR_HEALTH_FULL, hp_clamped)
         hp_color = apply_opacity(hp_color, opacity)
-        pygame.draw.rect(surface, hp_color, (bar_x, bar_y, fill_w, HEALTH_BAR_HEIGHT))
+        pygame.draw.rect(surface, hp_color, (bar_x, bar_y, fill_w, bar_height))
 
     # --- Distance ---
     dist_text = f"{dist:.0f}m"
     dist_color = apply_opacity(COLOR_DISTANCE, opacity)
-    dist_surf, dist_rect = font.render(dist_text, dist_color)
+    dist_surf, dist_rect = font.render(dist_text, dist_color, size=font_size)
     dist_x = ix - dist_rect.width // 2
     dist_y = iy + DISTANCE_OFFSET_Y
     surface.blit(dist_surf, (dist_x, dist_y))
