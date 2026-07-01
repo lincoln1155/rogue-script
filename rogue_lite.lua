@@ -484,6 +484,7 @@ local function simulateClick()
     end)
 end
 
+local uis = game:GetService("UserInputService")
 local function setupAutoSkills(char)
     char.ChildAdded:Connect(function(child)
         if child:IsA("Tool") then
@@ -491,8 +492,19 @@ local function setupAutoSkills(char)
                 task.wait(0.05) -- Wait briefly for the tool to fully equip
                 simulateClick()
             elseif child.Name == "Action Surge" then
-                task.wait(0.1) -- Allow Action Surge to process its equip/activation
-                equipSword()
+                local inputConn, unequipConn
+                
+                inputConn = uis.InputBegan:Connect(function(input, gameProcessed)
+                    if not gameProcessed and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        task.wait(0.1) -- Small delay to allow the game to process the skill
+                        equipSword()
+                    end
+                end)
+                
+                unequipConn = child.Unequipped:Connect(function()
+                    if inputConn then inputConn:Disconnect() end
+                    if unequipConn then unequipConn:Disconnect() end
+                end)
             end
         end
     end)
