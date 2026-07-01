@@ -114,16 +114,9 @@ local Lighting = game:GetService("Lighting")
 
 local function disablePostEffect(instance)
     if not instance:IsA("PostEffect") then return end
-
+    
+    -- Only disable it initially, do not hook property changes so we don't break in-game blur mechanics
     instance.Enabled = false
-
-    -- If the game re-enables it (e.g. blindness/sanity effects), disable it again.
-    -- This is event-driven, not a loop — zero cost when nothing changes.
-    instance:GetPropertyChangedSignal("Enabled"):Connect(function()
-        if instance.Enabled then
-            instance.Enabled = false
-        end
-    end)
 end
 
 -- Disable all existing post-processing in Lighting
@@ -136,11 +129,7 @@ for _, child in ipairs(workspace.CurrentCamera:GetChildren()) do
     disablePostEffect(child)
 end
 
--- Catch any new effects the game adds later
-Lighting.ChildAdded:Connect(disablePostEffect)
-workspace.CurrentCamera.ChildAdded:Connect(disablePostEffect)
-
-print("[RogueLite] Post-processing disabled")
+print("[RogueLite] Initial post-processing disabled (dynamic effects allowed)")
 
 -- ============================================================
 -- SPECTATE (right-click leaderboard names)
@@ -464,7 +453,60 @@ else
 end
 
 -- ============================================================
+-- QOL: AUTO-ACTIVATE SKILLS
+-- ============================================================
+
+local chargeSkills = {
+    ["Thunder Charge"] = true,
+    ["Ice Charge"] = true,
+    ["Flame Charge"] = true,
+    ["White Fire Charge"] = true
+}
+
+local function equipSword()
+    local char = plr.Character
+    if not char then return end
+    local humanoid = char:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    local sword = plr.Backpack:FindFirstChild("Sword") or char:FindFirstChild("Sword")
+    if sword and sword.Parent == plr.Backpack then
+        humanoid:EquipTool(sword)
+    end
+end
+
+local function simulateClick()
+    task.spawn(function()
+        local vim = game:GetService("VirtualInputManager")
+        vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
+        task.wait(0.05)
+        vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
+    end)
+end
+
+local function setupAutoSkills(char)
+    char.ChildAdded:Connect(function(child)
+        if child:IsA("Tool") then
+            if chargeSkills[child.Name] then
+                task.wait(0.05) -- Wait briefly for the tool to fully equip
+                simulateClick()
+            elseif child.Name == "Action Surge" then
+                task.wait(0.1) -- Allow Action Surge to process its equip/activation
+                equipSword()
+            end
+        end
+    end)
+end
+
+if plr.Character then
+    setupAutoSkills(plr.Character)
+end
+plr.CharacterAdded:Connect(setupAutoSkills)
+
+print("[RogueLite] QoL Auto-Skills initialized")
+
+-- ============================================================
 -- DONE
 -- ============================================================
 
-print("[RogueLite] Loaded successfully - No Textures + No Post-Processing + Spectate + Status Dots")
+print("[RogueLite] Loaded successfully - No Textures + No Post-Processing + Spectate + Auto-Skills")
