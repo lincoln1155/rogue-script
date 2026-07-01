@@ -9,13 +9,21 @@
            spectate that player. Right-click the same player (or yourself) to stop.
         4. Player Status Dots - Green/red dots on leaderboard names showing if a player
            is spawned in (green) or at the menu (red). Only visible on hover.
+        5. Auto-Skills - Automatically activates charge skills (Thunder/Ice/Flame/White Fire)
+           and handles Action Surge re-equip.
+        6. ESP (external overlay) - Streams player positions, health, and rogue names to
+           an external Python overlay app (esp_overlay.exe) via WebSocket/HTTP. The overlay
+           renders dots, names, health bars, and distance on a transparent always-on-top
+           window. See ESP_PLAN.md for details.
     
     Executor Requirements:
         - Minimum: Any executor that can run Lua scripts (text-matching fallback)
         - Recommended: getconnections() + debug.getupvalues() for reliable player detection
           (Solara, Wave, Fluxus, and most modern free executors support this)
+        - ESP: WebSocket support recommended (fallback: http_request/request for HTTP POST)
     
-    Ban Risk: Essentially zero. Both features are purely client-side.
+    Ban Risk: Essentially zero. All features are purely client-side.
+              ESP is external (separate process), no in-game UI modifications.
 ]]
 
 -- ============================================================
@@ -518,7 +526,222 @@ plr.CharacterAdded:Connect(setupAutoSkills)
 print("[RogueLite] QoL Auto-Skills initialized")
 
 -- ============================================================
+-- ESP DATA SENDER (external overlay)
+-- ============================================================
+
+local HttpService = game:GetService("HttpService")
+
+local ESP_PORT = 27015
+local ESP_WS_PORT = ESP_PORT + 1
+local ESP_UPDATE_INTERVAL = 0.1 -- 100ms (~10 updates/sec)
+local ESP_EXE_PATH = os.getenv("LOCALAPPDATA") .. "\\RogueLiteESP\\esp_overlay.exe"
+
+-- Resolve rogue in-game name for a player by checking leaderboard labels
+-- labelPlayerMap is defined in the SPECTATE section above
+local function getRogueName(player)
+    for label, data in pairs(labelPlayerMap) do
+        if data.player == player and label:IsA("TextLabel") then
+            local text = label.Text
+            if text and text ~= "" then
+                -- Strip invisible Unicode characters (right-to-left marks, etc.)
+                text = text:gsub("\226\128\142", "")
+                text = text:match("^%s*(.-)%s*$") -- Trim whitespace
+                return text
+            end
+        end
+    end
+    -- Fallback: use Roblox display name if leaderboard hasn't mapped yet
+    return player.DisplayName
+end
+
+-- Try to auto-launch the overlay .exe if it's not already running
+local function tryLaunchOverlay()
+    -- Check if the exe exists
+    local file = io.open(ESP_EXE_PATH, "r")
+    if not file then
+        print("[RogueLite] ESP overlay not found at: " .. ESP_EXE_PATH)
+        print("[RogueLite] Start it manually or place esp_overlay.exe in %LOCALAPPDATA%\\RogueLiteESP\\")
+        return false
+    end
+    file:close()
+
+    -- Try to launch it (various executor methods)
+    local launched = false
+    
+    -- Method 1: os.execute (backgrounded)
+    if not launched then
+        local ok = pcall(function()
+            os.execute('start "" "' .. ESP_EXE_PATH .. '"')
+        end)
+        if ok then launched = true end
+    end
+
+    -- Method 2: executor-specific 'run' function
+    if not launched and typeof(run) == "function" then
+        local ok = pcall(function()
+            run(ESP_EXE_PATH)
+        end)
+        if ok then launched = true end
+    end
+
+    if launched then
+        print("[RogueLite] ESP overlay launched from: " .. ESP_EXE_PATH)
+        task.wait(2) -- Give it time to start
+    else
+        print("[RogueLite] Could not auto-launch ESP overlay. Please start it manually.")
+    end
+    
+    return launched
+end
+
+-- Build the data payload
+local function buildESPPayload()
+    local camera = workspace.CurrentCamera
+    if not camera then return nil end
+
+    local cf = camera.CFrame
+    local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = cf:GetComponents()
+    local fov = camera.FieldOfView
+    local vpSize = camera.ViewportSize
+
+    local myChar = plr.Character
+    local myRoot = myChar and myChar:FindFirstChild("HumanoidRootPart")
+    local myPos = myRoot and myRoot.Position
+
+    local playerList = {}
+    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        if otherPlayer ~= plr then
+            local char = otherPlayer.Character
+            if char then
+                local root = char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char:FindFirstChildOfClass("Humanoid")
+                if root and humanoid then
+                    local pos = root.Position
+                    local dist = myPos and (pos - myPos).Magnitude or 0
+                    local hp = humanoid.MaxHealth > 0 and (humanoid.Health / humanoid.MaxHealth) or 0
+
+                    table.insert(playerList, {
+                        name = getRogueName(otherPlayer),
+                        pos = {pos.X, pos.Y, pos.Z},
+                        hp = hp,
+                        dist = dist,
+                    })
+                end
+            end
+        end
+    end
+
+    return {
+        camera = {
+            cf = {x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22},
+            fov = fov,
+            vp = {vpSize.X, vpSize.Y},
+        },
+        players = playerList,
+    }
+end
+
+-- Connection state
+local espConnection = nil -- WebSocket connection object
+local espUseHTTP = false  -- Fallback flag
+
+-- Try to establish WebSocket connection
+local function connectWebSocket()
+    if not WebSocket then
+        print("[RogueLite] ESP: WebSocket not available, using HTTP fallback")
+        espUseHTTP = true
+        return
+    end
+
+    local ok, ws = pcall(function()
+        return WebSocket.connect("ws://127.0.0.1:" .. tostring(ESP_WS_PORT))
+    end)
+
+    if ok and ws then
+        espConnection = ws
+        print("[RogueLite] ESP: WebSocket connected to overlay")
+
+        -- Handle disconnect
+        task.spawn(function()
+            local closeOk, _ = pcall(function()
+                ws.OnClose:Wait()
+            end)
+            espConnection = nil
+            print("[RogueLite] ESP: WebSocket disconnected, will retry...")
+        end)
+    else
+        print("[RogueLite] ESP: WebSocket failed, using HTTP fallback")
+        espUseHTTP = true
+    end
+end
+
+-- Send data via HTTP POST (fallback)
+local function sendHTTP(payload)
+    local json = HttpService:JSONEncode(payload)
+    local req = http_request or request
+    if not req then return false end
+
+    local ok, response = pcall(req, {
+        Url = "http://127.0.0.1:" .. tostring(ESP_PORT) .. "/update",
+        Method = "POST",
+        Headers = {
+            ["Content-Type"] = "application/json",
+        },
+        Body = json,
+    })
+
+    return ok and response and response.Success
+end
+
+-- Send data via WebSocket (primary)
+local function sendWebSocket(payload)
+    if not espConnection then return false end
+    local json = HttpService:JSONEncode(payload)
+    local ok = pcall(function()
+        espConnection:Send(json)
+    end)
+    return ok
+end
+
+-- Main ESP data loop
+task.spawn(function()
+    -- Try to auto-launch overlay
+    tryLaunchOverlay()
+
+    -- Try WebSocket first
+    connectWebSocket()
+
+    -- Data send loop
+    while true do
+        task.wait(ESP_UPDATE_INTERVAL)
+
+        local payload = buildESPPayload()
+        if not payload then continue end
+
+        if not espUseHTTP and espConnection then
+            -- Primary: WebSocket
+            local ok = sendWebSocket(payload)
+            if not ok then
+                -- WebSocket broke, try reconnecting
+                espConnection = nil
+                task.spawn(connectWebSocket)
+            end
+        elseif espUseHTTP then
+            -- Fallback: HTTP POST
+            sendHTTP(payload)
+        else
+            -- No connection, try reconnecting WebSocket periodically
+            task.spawn(connectWebSocket)
+            task.wait(5) -- Don't spam reconnect attempts
+        end
+    end
+end)
+
+print("[RogueLite] ESP Data Sender initialized (port " .. tostring(ESP_PORT) .. ")")
+
+-- ============================================================
 -- DONE
 -- ============================================================
 
-print("[RogueLite] Loaded successfully - No Textures + No Post-Processing + Spectate + Auto-Skills")
+print("[RogueLite] Loaded successfully - No Textures + No Post-Processing + Spectate + Auto-Skills + ESP")
+
