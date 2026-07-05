@@ -9,9 +9,7 @@
            spectate that player. Right-click the same player (or yourself) to stop.
         4. Player Status Dots - Green/red dots on leaderboard names showing if a player
            is spawned in (green) or at the menu (red). Only visible on hover.
-        5. Auto-Skills - Automatically activates charge skills (Thunder/Ice/Flame/White Fire)
-           and handles Action Surge re-equip.
-        6. ESP (external overlay) - Streams player positions, health, and rogue names to
+        5. ESP (external overlay) - Streams player positions, health, and rogue names to
            an external Python overlay app (esp_overlay.exe) via WebSocket/HTTP. The overlay
            renders dots, names, health bars, and distance on a transparent always-on-top
            window. See ESP_PLAN.md for details.
@@ -46,6 +44,8 @@ end
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
+local HttpService = game:GetService("HttpService")
+local UserInputService = game:GetService("UserInputService")
 
 local plr = Players.LocalPlayer
 repeat task.wait() until plr and plr.Backpack
@@ -54,35 +54,71 @@ repeat task.wait() until plr and plr.Backpack
 repeat task.wait() until StarterGui:FindFirstChild("LeaderboardGui")
 
 -- ============================================================
--- NO TEXTURES (always on)
+-- CONFIGURATION MANAGER
+-- ============================================================
+
+local LiteConfig = {
+    QOLEnabled = true         -- Controls No Textures & No Post-Processing
+}
+
+local configPath = "HYDROXIDE/rogue_lite_config.json"
+
+local function SaveConfig()
+    pcall(function()
+        if not isfolder("HYDROXIDE") then makefolder("HYDROXIDE") end
+        local json = HttpService:JSONEncode(LiteConfig)
+        writefile(configPath, json)
+    end)
+end
+
+local function LoadConfig()
+    pcall(function()
+        if isfile(configPath) then
+            local data = readfile(configPath)
+            local parsed = HttpService:JSONDecode(data)
+            for k, v in pairs(parsed) do
+                if LiteConfig[k] ~= nil then
+                    LiteConfig[k] = v
+                end
+            end
+        else
+            SaveConfig()
+        end
+    end)
+end
+
+LoadConfig()
+
+-- ============================================================
+-- QOL FEATURES (No Textures & No Post-Processing)
 -- ============================================================
 
 local original_materials = {}
+local original_post_processing = {}
+local Lighting = game:GetService("Lighting")
 
 local function isBlacklisted(part)
-    -- Don't strip textures from thrown items (trinkets, weapons on the ground)
-    -- Exception: EarthPillar spell effect should still be stripped
     local thrown = workspace:FindFirstChild("Thrown")
     if thrown and part:IsDescendantOf(thrown) then
         local ancestor = part.Parent
         while ancestor and ancestor ~= workspace do
             if ancestor:IsA("Model") and ancestor.Name == "EarthPillar" then
-                return false -- Allow EarthPillar to be stripped
+                return false
             end
             ancestor = ancestor.Parent
         end
-        return true -- Block everything else in Thrown
+        return true
     end
     return false
 end
 
 local function applyNoTexture(part)
+    if not LiteConfig.QOLEnabled then return end
     if not part or not part:IsA("BasePart") then return end
     if not part:IsDescendantOf(game) then return end
     if part.Material == Enum.Material.ForceField then return end
     if isBlacklisted(part) then return end
 
-    -- Save original values so they could be restored if needed
     if not original_materials[part] then
         original_materials[part] = {
             Material = part.Material,
@@ -94,50 +130,80 @@ local function applyNoTexture(part)
     part.Reflectance = 0
 end
 
--- Apply to all existing parts in batches (avoids freezing on large maps)
-task.spawn(function()
-    local descendants = workspace:GetDescendants()
-    local batchSize = 500
-
-    for i = 1, #descendants, batchSize do
-        for j = i, math.min(i + batchSize - 1, #descendants) do
-            applyNoTexture(descendants[j])
+local function restoreNoTexture()
+    for part, data in pairs(original_materials) do
+        if part and part.Parent then
+            part.Material = data.Material
+            part.Reflectance = data.Reflectance
         end
-        task.wait() -- Yield between batches to prevent freezing
     end
-
-    print("[RogueLite] No Textures applied to " .. tostring(#descendants) .. " descendants")
-end)
-
--- Apply to any new parts that get added (new areas loading, spell effects, etc.)
-workspace.DescendantAdded:Connect(function(descendant)
-    applyNoTexture(descendant)
-end)
-
--- ============================================================
--- NO POST-PROCESSING (always on)
--- ============================================================
-
-local Lighting = game:GetService("Lighting")
+    original_materials = {}
+end
 
 local function disablePostEffect(instance)
+    if not LiteConfig.QOLEnabled then return end
     if not instance:IsA("PostEffect") then return end
     
-    -- Only disable it initially, do not hook property changes so we don't break in-game blur mechanics
+    if original_post_processing[instance] == nil then
+        original_post_processing[instance] = instance.Enabled
+    end
+    
     instance.Enabled = false
 end
 
--- Disable all existing post-processing in Lighting
-for _, child in ipairs(Lighting:GetChildren()) do
-    disablePostEffect(child)
+local function restorePostProcessing()
+    for instance, enabled in pairs(original_post_processing) do
+        if instance and instance.Parent then
+            instance.Enabled = enabled
+        end
+    end
+    original_post_processing = {}
 end
 
--- Disable any in the current Camera
-for _, child in ipairs(workspace.CurrentCamera:GetChildren()) do
-    disablePostEffect(child)
+local function applyQOL()
+    if not LiteConfig.QOLEnabled then return end
+    
+    -- Apply No Textures
+    task.spawn(function()
+        local descendants = workspace:GetDescendants()
+        local batchSize = 500
+
+        for i = 1, #descendants, batchSize do
+            for j = i, math.min(i + batchSize - 1, #descendants) do
+                applyNoTexture(descendants[j])
+            end
+            task.wait()
+        end
+    end)
+    
+    -- Apply Post Processing
+    for _, child in ipairs(Lighting:GetChildren()) do
+        disablePostEffect(child)
+    end
+    for _, child in ipairs(workspace.CurrentCamera:GetChildren()) do
+        disablePostEffect(child)
+    end
 end
 
-print("[RogueLite] Initial post-processing disabled (dynamic effects allowed)")
+local function restoreQOL()
+    restoreNoTexture()
+    restorePostProcessing()
+end
+
+-- Apply to any new parts that get added (new areas loading, spell effects, etc.)
+workspace.DescendantAdded:Connect(function(descendant)
+    if LiteConfig.QOLEnabled then
+        applyNoTexture(descendant)
+    end
+end)
+
+-- Initial QOL Apply
+if LiteConfig.QOLEnabled then
+    applyQOL()
+    print("[RogueLite] QOL Features enabled.")
+else
+    print("[RogueLite] QOL Features are off in config.")
+end
 
 -- ============================================================
 -- SPECTATE (right-click leaderboard names)
@@ -460,70 +526,6 @@ else
     print("[RogueLite] Serverhop persistence skipped (Executor does not support queue_on_teleport)")
 end
 
--- ============================================================
--- QOL: AUTO-ACTIVATE SKILLS
--- ============================================================
-
-local chargeSkills = {
-    ["Thunder Charge"] = true,
-    ["Ice Charge"] = true,
-    ["Flame Charge"] = true,
-    ["White Fire Charge"] = true
-}
-
-local function equipSword()
-    local char = plr.Character
-    if not char then return end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return end
-    
-    local sword = plr.Backpack:FindFirstChild("Sword") or char:FindFirstChild("Sword")
-    if sword and sword.Parent == plr.Backpack then
-        humanoid:EquipTool(sword)
-    end
-end
-
-local function simulateClick()
-    task.spawn(function()
-        local vim = game:GetService("VirtualInputManager")
-        vim:SendMouseButtonEvent(0, 0, 0, true, game, 1)
-        task.wait(0.05)
-        vim:SendMouseButtonEvent(0, 0, 0, false, game, 1)
-    end)
-end
-
-local uis = game:GetService("UserInputService")
-local function setupAutoSkills(char)
-    char.ChildAdded:Connect(function(child)
-        if child:IsA("Tool") then
-            if chargeSkills[child.Name] then
-                task.wait(0.05) -- Wait briefly for the tool to fully equip
-                simulateClick()
-            elseif child.Name == "Action Surge" then
-                local inputConn, unequipConn
-                
-                inputConn = uis.InputBegan:Connect(function(input, gameProcessed)
-                    if not gameProcessed and input.UserInputType == Enum.UserInputType.MouseButton1 then
-                        task.wait(0.1) -- Small delay to allow the game to process the skill
-                        equipSword()
-                    end
-                end)
-                
-                unequipConn = child.Unequipped:Connect(function()
-                    if inputConn then inputConn:Disconnect() end
-                    if unequipConn then unequipConn:Disconnect() end
-                end)
-            end
-        end
-    end)
-end
-
-if plr.Character then
-    setupAutoSkills(plr.Character)
-end
-plr.CharacterAdded:Connect(setupAutoSkills)
-
-print("[RogueLite] QoL Auto-Skills initialized")
 
 -- ============================================================
 -- ESP DATA SENDER (external overlay)
@@ -746,9 +748,36 @@ end)
 
 print("[RogueLite] ESP Data Sender initialized (port " .. tostring(ESP_PORT) .. ")")
 
+
+-- ============================================================
+-- HOTKEYS
+-- ============================================================
+
+UserInputService.InputBegan:Connect(function(input, gameProcessedEvent)
+    if gameProcessedEvent then return end
+
+    if UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) or UserInputService:IsKeyDown(Enum.KeyCode.RightControl) then
+        -- Toggle QOL (CTRL + Y)
+        if input.KeyCode == Enum.KeyCode.Y then
+            LiteConfig.QOLEnabled = not LiteConfig.QOLEnabled
+            SaveConfig()
+            
+            if LiteConfig.QOLEnabled then
+                applyQOL()
+                -- Notification could be added here if needed
+                print("[RogueLite] QOL Enabled")
+            else
+                restoreQOL()
+                print("[RogueLite] QOL Disabled")
+            end
+        end
+
+
+    end
+end)
+
 -- ============================================================
 -- DONE
 -- ============================================================
 
-print("[RogueLite] Loaded successfully - No Textures + No Post-Processing + Spectate + Auto-Skills + ESP")
-
+print("[RogueLite] Loaded successfully - No Textures + No Post-Processing + Spectate + ESP")
