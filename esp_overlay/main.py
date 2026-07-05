@@ -54,7 +54,7 @@ DEFAULT_VIEWPORT = (1920, 1080)
 
 # Proximity fade settings
 FADE_START_DIST = 200.0   # Start fading down when closer than this (studs)
-FADE_MIN_OPACITY = 0.20  # Minimum opacity at 0 distance
+FADE_MIN_OPACITY = 0.50  # Minimum opacity at 0 distance
 FADE_FAR_DIST = 3000.0   # Start fading out when farther than this
 
 # Rendering settings
@@ -71,6 +71,13 @@ COLOR_DISTANCE = (200, 200, 200)
 COLOR_HEALTH_FULL = (75, 200, 75)
 COLOR_HEALTH_EMPTY = (200, 75, 75)
 COLOR_HEALTH_BG = (40, 40, 40)
+COLOR_TRINKET = (255, 255, 255)
+
+IMPORTANT_TRINKETS = {
+    "Ornament", "Present", "Candy", "Scary Mask", "Pumpkin Centerpiece", "Idol of War",
+    "Rift Gem", "Amulet of the White King", "Lannis Amulet", "Mysterious Artifact",
+    "Phoenix Flower", "Azael Horn", "Phoenix Down", "Night Stone", "Howler Friend", "Ice Essence"
+}
 
 # ============================================================
 # SHARED STATE
@@ -83,6 +90,7 @@ class GameState:
         self.lock = threading.Lock()
         self.camera = None       # {"cf": [...], "fov": float, "vp": [w, h]}
         self.players = []        # [{"name": str, "pos": [x,y,z], "hp": float, "dist": float}, ...]
+        self.trinkets = []       # [{"name": str, "pos": [x,y,z], "dist": float}, ...]
         self.last_update = 0.0
         self.connected = False
 
@@ -107,6 +115,7 @@ class GameState:
                 }
 
             self.players = new_players
+            self.trinkets = data.get("trinkets", [])
             self.last_update = now
             self.connected = True
 
@@ -143,6 +152,7 @@ class GameState:
             return {
                 "camera": dict(self.camera) if self.camera else None,
                 "players": list(self.players),
+                "trinkets": list(self.trinkets),
                 "connected": self.connected,
                 "age": time.time() - self.last_update if self.last_update > 0 else float("inf"),
             }
@@ -328,54 +338,82 @@ def apply_opacity(color, opacity):
     )
 
 
-def draw_esp_marker(surface, font, x, y, name, hp, dist, opacity):
-    """Draw a single ESP marker (name + health bar + distance)."""
-    ix, iy = int(x), int(y)
+def draw_esp_marker(surface, font, cx, top_sy, bot_sy, name, hp, dist, opacity, box_h):
+    """Draw a single ESP marker (name above head, vertical health bar on the right)."""
+    ix = int(cx)
+    top_y = int(top_sy)
+    bot_y = int(bot_sy)
 
-    # Calculate dynamic scale
-    # Smaller when close (<200) and smaller when far (>1000)
     scale = 1.0
     if dist < FADE_START_DIST:
-        scale = 0.5 + 0.5 * (dist / FADE_START_DIST)
+        scale = 0.7 + 0.3 * (dist / FADE_START_DIST)
     elif dist > 1000.0:
-        scale = max(0.4, 1.0 - (dist - 1000.0) / 4000.0)
+        scale = 0.6
+    else:
+        scale = max(0.6, 1.0 - 0.4 * ((dist - FADE_START_DIST) / (1000.0 - FADE_START_DIST)))
 
-    font_size = max(8, int(12 * scale))
-    bar_width = max(10, int(HEALTH_BAR_WIDTH * scale))
-    bar_height = max(2, int(HEALTH_BAR_HEIGHT * scale))
+    font_size = max(10, int(12 * scale))
     
-    name_off = int(NAME_OFFSET_Y * scale)
-    dist_off = int(DISTANCE_OFFSET_Y * scale)
-
-    # --- Name ---
+    # We want name and distance above the head
     name_color = apply_opacity(COLOR_NAME, opacity)
     name_surf, name_rect = font.render(name, name_color, size=font_size)
+    
+    dist_text = f"{dist:.0f}m"
+    dist_color = apply_opacity(COLOR_DISTANCE, opacity)
+    dist_surf, dist_rect = font.render(dist_text, dist_color, size=font_size)
+
+    text_spacing = 2
+    total_text_h = name_rect.height + dist_rect.height + text_spacing
+    
+    # --- Name ---
     name_x = ix - name_rect.width // 2
-    name_y = iy + name_off - name_rect.height
+    name_y = top_y - total_text_h - int(5 * scale)
     surface.blit(name_surf, (name_x, name_y))
 
-    # --- Health bar ---
-    bar_x = ix - bar_width // 2
-    bar_y = iy + HEALTH_BAR_OFFSET_Y
+    # --- Distance ---
+    dist_x = ix - dist_rect.width // 2
+    dist_y = name_y + name_rect.height + text_spacing
+    surface.blit(dist_surf, (dist_x, dist_y))
+
+    # --- Vertical Health bar on the right ---
+    bar_width = max(2, int(4 * scale))
+    bar_height = max(10, int(box_h))
+    
+    box_w = box_h / 2.0
+    bar_x = ix + int(box_w / 2) + int(5 * scale)
+    bar_y = top_y
 
     # Background
     bg_color = apply_opacity(COLOR_HEALTH_BG, opacity)
     pygame.draw.rect(surface, bg_color, (bar_x, bar_y, bar_width, bar_height))
 
-    # Filled portion
+    # Filled portion (fill from bottom to top)
     hp_clamped = max(0.0, min(1.0, hp))
-    fill_w = int(bar_width * hp_clamped)
-    if fill_w > 0:
+    fill_h = int(bar_height * hp_clamped)
+    if fill_h > 0:
         hp_color = lerp_color(COLOR_HEALTH_EMPTY, COLOR_HEALTH_FULL, hp_clamped)
         hp_color = apply_opacity(hp_color, opacity)
-        pygame.draw.rect(surface, hp_color, (bar_x, bar_y, fill_w, bar_height))
+        pygame.draw.rect(surface, hp_color, (bar_x, bar_y + (bar_height - fill_h), bar_width, fill_h))
+
+
+def draw_trinket_marker(surface, font, x, y, name, dist):
+    """Draw a single trinket marker (name + distance) with fixed size and opacity."""
+    ix, iy = int(x), int(y)
+
+    font_size = 14
+    dist_off = 15
+
+    # --- Name ---
+    name_surf, name_rect = font.render(name, COLOR_TRINKET, size=font_size)
+    name_x = ix - name_rect.width // 2
+    name_y = iy - name_rect.height // 2
+    surface.blit(name_surf, (name_x, name_y))
 
     # --- Distance ---
     dist_text = f"{dist:.0f}m"
-    dist_color = apply_opacity(COLOR_DISTANCE, opacity)
-    dist_surf, dist_rect = font.render(dist_text, dist_color, size=font_size)
+    dist_surf, dist_rect = font.render(dist_text, COLOR_DISTANCE, size=font_size)
     dist_x = ix - dist_rect.width // 2
-    dist_y = iy + DISTANCE_OFFSET_Y
+    dist_y = iy + dist_off + name_rect.height // 2
     surface.blit(dist_surf, (dist_x, dist_y))
 
 
@@ -503,35 +541,68 @@ def main():
             cam_vp = camera["vp"]
 
             for player in snapshot["players"]:
+                if player["dist"] > 1000.0:
+                    continue
+
                 # Get interpolated position for smooth rendering
                 interp_pos = game_state.get_interpolated_pos(player["name"], player["pos"])
 
-                # Project world position to screen
+                # Calculate bounding box
+                top_pos = [interp_pos[0], interp_pos[1] + 2.5, interp_pos[2]]
+                bot_pos = [interp_pos[0], interp_pos[1] - 3.0, interp_pos[2]]
+
+                top_sx, top_sy, top_vis = world_to_screen(top_pos, cf, fov, cam_vp[0], cam_vp[1])
+                bot_sx, bot_sy, bot_vis = world_to_screen(bot_pos, cf, fov, cam_vp[0], cam_vp[1])
+
+                if not top_vis and not bot_vis:
+                    continue
+
+                scale_x = vp_w / cam_vp[0]
+                scale_y = vp_h / cam_vp[1]
+                top_sx *= scale_x
+                top_sy *= scale_y
+                bot_sx *= scale_x
+                bot_sy *= scale_y
+
+                cx = (top_sx + bot_sx) / 2
+                box_h = abs(bot_sy - top_sy)
+
+                opacity = get_opacity(player["dist"])
+
+                draw_esp_marker(
+                    screen, font,
+                    cx, top_sy, bot_sy,
+                    player["name"],
+                    player["hp"],
+                    player["dist"],
+                    opacity, box_h
+                )
+
+            # Draw trinkets
+            for trinket in snapshot.get("trinkets", []):
+                t_name = trinket["name"]
+                t_dist = trinket["dist"]
+                
+                if t_dist >= 150.0 and t_name not in IMPORTANT_TRINKETS:
+                    continue
+
                 sx, sy, visible = world_to_screen(
-                    interp_pos, cf, fov, cam_vp[0], cam_vp[1]
+                    trinket["pos"], cf, fov, cam_vp[0], cam_vp[1]
                 )
 
                 if not visible:
                     continue
 
-                # Scale screen coordinates if overlay size differs from game viewport
-                # (e.g., game runs at 1920x1080 but overlay matches a different window size)
                 scale_x = vp_w / cam_vp[0]
                 scale_y = vp_h / cam_vp[1]
                 sx *= scale_x
                 sy *= scale_y
 
-                # Calculate proximity fade opacity
-                opacity = get_opacity(player["dist"])
-
-                # Draw the marker
-                draw_esp_marker(
+                draw_trinket_marker(
                     screen, font,
                     sx, sy,
-                    player["name"],
-                    player["hp"],
-                    player["dist"],
-                    opacity
+                    trinket["name"],
+                    trinket["dist"]
                 )
 
         pygame.display.flip()

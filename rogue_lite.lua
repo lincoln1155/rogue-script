@@ -603,6 +603,128 @@ local function tryLaunchOverlay()
     return launched
 end
 
+-- ============================================================
+-- TRINKET ESP
+-- ============================================================
+
+local masks = {
+    "135210454467508", "130937394581985", "110718109649132",
+    "78990214596147", "77406341502228", "118090092039844"
+}
+
+local function in_table(tbl, val)
+    for _, v in ipairs(tbl) do
+        if v == val then return true end
+    end
+    return false
+end
+
+local function identify_trinket(v)
+    local ok, assetId = pcall(function() 
+        return gethiddenproperty(v, "AssetId"):gsub("%%20", ""):match("%d+") 
+    end)
+    assetId = ok and assetId or ""
+
+    if (v.ClassName == 'UnionOperation' and assetId == "2765613127") then
+        return 'Idol of the Forgotten'
+    elseif (v.ClassName == 'UnionOperation' and assetId == "15583017412") then
+        return 'Ornament'
+    elseif (v.ClassName == 'UnionOperation' and assetId == "15611175305") then
+        return 'Present'
+    elseif (v.ClassName == 'MeshPart' and v.MeshId == 'rbxassetid://5196782997') then
+        return 'Old Ring'
+    elseif (v.ClassName == 'MeshPart' and v.MeshId == 'rbxassetid://5196776695') then
+        return 'Ring'
+    elseif (v.ClassName == 'MeshPart' and v.MeshId == 'rbxassetid://5204003946') then
+        return 'Goblet'
+    elseif (v.ClassName == 'MeshPart' and v.MeshId == 'rbxassetid://5196577540') then
+        return 'Old Amulet'
+    elseif (v.ClassName == 'MeshPart' and v.MeshId == 'rbxassetid://5196551436') then
+        return 'Amulet'
+    elseif (v.ClassName == 'Part' and v:FindFirstChildWhichIsA("SpecialMesh") and v:FindFirstChild('OrbParticle')) then
+        return '???'
+    elseif (v.ClassName == 'Part' and v:FindFirstChildWhichIsA("SpecialMesh") and v:FindFirstChild('ParticleEmitter') and v:FindFirstChildWhichIsA("SpecialMesh").MeshId == "" and v:FindFirstChildWhichIsA("SpecialMesh").MeshType == Enum.MeshType.Sphere) then
+        return 'Opal'
+    elseif (v.ClassName == 'MeshPart' and v.MeshId == 'rbxassetid://5204453430') then
+        return 'Scroll'
+    elseif (v:FindFirstChild('Mesh') and v.Mesh.MeshId == 'rbxassetid://%202877143560%20' and v:FindFirstChild('ParticleEmitter') and string.match(tostring(v.ParticleEmitter.Color), '0 1 1 1 0 1 1 1 1 0') and v.ClassName == 'Part' and tostring(v.Color) == '0.643137, 0.733333, 0.745098') then
+        return 'Diamond'
+    elseif (v:FindFirstChild('Mesh') and v.Mesh.MeshId == 'rbxassetid://%202877143560%20' and v:FindFirstChild('ParticleEmitter') and string.match(tostring(v.ParticleEmitter.Color), '0 1 1 1 0 1 1 1 1 0') and v.ClassName == 'Part' and v.Color.G > v.Color.R and v.Color.G > v.Color.B) then
+        return 'Emerald'
+    elseif (v:FindFirstChild('Mesh') and v.Mesh.MeshId == 'rbxassetid://%202877143560%20' and v:FindFirstChild('ParticleEmitter') and string.match(tostring(v.ParticleEmitter.Color), '0 1 1 1 0 1 1 1 1 0') and v.ClassName == 'Part' and v.Color.R > v.Color.G and v.Color.R > v.Color.B) then
+        return 'Ruby'
+    elseif (v:FindFirstChild('Mesh') and v.Mesh.MeshId == 'rbxassetid://%202877143560%20' and v:FindFirstChild('ParticleEmitter') and string.match(tostring(v.ParticleEmitter.Color), '0 1 1 1 0 1 1 1 1 0') and v.ClassName == 'Part' and v.Color.B > v.Color.G and v.Color.B > v.Color.R) then
+        return 'Sapphire'
+    elseif (v.ClassName == 'Part' and v:FindFirstChild('ParticleEmitter') and not string.match(tostring(v.ParticleEmitter.Color), '0 1 1 1 0 1 1 1 1 0')) then
+        return 'Rift Gem'
+    elseif (v.ClassName == "MeshPart" and v.MeshId == "rbxassetid://5197099782" and v:FindFirstChild("MeshPart") and v.MeshPart.MeshId == "rbxassetid://5197111525") then
+        return 'Amulet of the White King'
+    elseif (v.ClassName == "MeshPart" and v.MeshId == "rbxassetid://5196963069" and v:FindFirstChild("MeshPart") and v.MeshPart.MeshId == "rbxassetid://5196975152") then
+        return 'Lannis Amulet'
+    elseif (v:FindFirstChild('Attachment') and v.Attachment:FindFirstChildOfClass('ParticleEmitter') and v.Attachment:FindFirstChildOfClass('ParticleEmitter').Rate == 3) then
+        return 'Mysterious Artifact'
+    elseif (v:IsA('MeshPart') and v.MeshId == "rbxassetid://4103271893") then
+        return 'Candy'
+    elseif v.ClassName == "UnionOperation" then
+        if in_table(masks, assetId) then
+            return "Scary Mask"
+        elseif assetId == "4117970107" then
+            return "Pumpkin Centerpiece"
+        elseif assetId == "17590006505" then
+            return "Idol of War"
+        end
+    elseif (v:FindFirstChild('Attachment') and v.Attachment:FindFirstChildOfClass('ParticleEmitter') and v.Attachment:FindFirstChildOfClass('ParticleEmitter').Rate == 5 and tostring(v.Attachment:FindFirstChildOfClass('ParticleEmitter').Color):split(" ")[3] ~= "0.8") then
+        local name = (game.PlaceId == 3541987450) and 'Phoenix Flower' or 'Azael Horn'
+        return name
+    elseif (v:FindFirstChild('Attachment') and v.Attachment:FindFirstChildOfClass('ParticleEmitter') and v.Attachment:FindFirstChildOfClass('ParticleEmitter').Rate == 5 and tostring(v.Attachment:FindFirstChildOfClass('ParticleEmitter').Color):split(" ")[3]=="0.8") then
+        return 'Phoenix Down'
+    elseif (v.ClassName == 'MeshPart' and v.BrickColor.Name == 'Black') then
+        return 'Night Stone'
+    elseif (v.ClassName == 'MeshPart' and v.MeshId == 'rbxassetid://%202520762076%20') then
+        return 'Howler Friend'
+    elseif (v.ClassName == 'Part' and v:FindFirstChild('OrbParticle') and string.match(tostring(v.OrbParticle.Color), '0 0.105882 0.596078 0.596078 0 1 0.105882 0.596078 0.596078 0 ')) then
+        return 'Ice Essence'
+    end
+
+    if game.PlaceId == 3541987450 then
+        if (v.ClassName == "MeshPart" and v.MeshId == "rbxassetid://4027112893" and v:FindFirstChild("Part")) then
+            return 'Bound Book'
+        elseif (v.ClassName == "MeshPart" and v.MeshId == "rbxassetid://%202877143560%20" and v.Color.B < v.Color.G and v.Color.B > v.Color.R) then
+            return 'Emerald'
+        elseif (v.ClassName == "MeshPart" and v.MeshId == "rbxassetid://%202877143560%20" and v.Color.R > v.Color.G and v.Color.R > v.Color.B) then
+            return 'Ruby'
+        elseif (v.ClassName == "MeshPart" and v.MeshId == "rbxassetid://%202877143560%20" and v.Color.B > v.Color.R and v.Color.B > v.Color.G) then
+            return 'Sapphire'
+        elseif (v.ClassName == "MeshPart" and v.MeshId == "rbxassetid://%202877143560%20" and tostring(v.Color) == '0.643137, 0.733333, 0.745098') then
+            return 'Diamond'
+        end
+    end
+
+    return "Opal"
+end
+
+local activeTrinkets = {}
+
+local function addTrinket(v)
+    if v.Name == "Part" and v:FindFirstChild("ID") then
+        local trinketName = identify_trinket(v)
+        if trinketName then
+            activeTrinkets[v] = trinketName
+        end
+    end
+end
+
+for _, v in ipairs(workspace:GetChildren()) do
+    addTrinket(v)
+end
+
+workspace.ChildAdded:Connect(addTrinket)
+workspace.ChildRemoved:Connect(function(v)
+    if activeTrinkets[v] then
+        activeTrinkets[v] = nil
+    end
+end)
+
 -- Build the data payload
 local function buildESPPayload()
     local camera = workspace.CurrentCamera
@@ -626,7 +748,7 @@ local function buildESPPayload()
                 local humanoid = char:FindFirstChildOfClass("Humanoid")
                 if root and humanoid then
                     local pos = root.Position
-                    local dist = myPos and (pos - myPos).Magnitude or 0
+                    local dist = (camera.CFrame.Position - pos).Magnitude
                     local hp = humanoid.MaxHealth > 0 and (humanoid.Health / humanoid.MaxHealth) or 0
 
                     table.insert(playerList, {
@@ -640,14 +762,33 @@ local function buildESPPayload()
         end
     end
 
-    return {
+    local trinketsPayload = {}
+    for obj, tName in pairs(activeTrinkets) do
+        if obj.Parent == workspace and obj:IsA("BasePart") then
+            local pPos = obj.Position
+            local dist = (camera.CFrame.Position - pPos).Magnitude
+            table.insert(trinketsPayload, {
+                name = tName,
+                pos = {pPos.X, pPos.Y, pPos.Z},
+                dist = dist
+            })
+        else
+            -- Cleanup stale entries just in case
+            activeTrinkets[obj] = nil
+        end
+    end
+
+    local payload = {
         camera = {
             cf = {x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22},
             fov = fov,
-            vp = {vpSize.X, vpSize.Y},
+            vp = {vpSize.X, vpSize.Y}
         },
         players = playerList,
+        trinkets = trinketsPayload
     }
+
+    return payload
 end
 
 -- Connection state
