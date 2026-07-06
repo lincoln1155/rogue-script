@@ -73,8 +73,11 @@ COLOR_HEALTH_EMPTY = (200, 75, 75)
 COLOR_HEALTH_BG = (40, 40, 40)
 COLOR_TRINKET = (255, 255, 255)
 
-IMPORTANT_TRINKETS = {
-    "Ornament", "Present", "Candy", "Scary Mask", "Pumpkin Centerpiece", "Idol of War",
+EVENT_TRINKETS = {
+    "Ornament", "Present", "Candy", "Scary Mask", "Pumpkin Centerpiece", "Idol of War"
+}
+
+ARTIFACT_TRINKETS = {
     "Rift Gem", "Amulet of the White King", "Lannis Amulet", "Mysterious Artifact",
     "Phoenix Flower", "Azael Horn", "Phoenix Down", "Night Stone", "Howler Friend", "Ice Essence"
 }
@@ -396,7 +399,7 @@ def draw_esp_marker(surface, font, cx, top_sy, bot_sy, name, hp, dist, opacity, 
         pygame.draw.rect(surface, hp_color, (bar_x, bar_y + (bar_height - fill_h), bar_width, fill_h))
 
 
-def draw_trinket_marker(surface, font, x, y, name, dist):
+def draw_trinket_marker(surface, font, x, y, name, dist, color):
     """Draw a single trinket marker (name + distance) with fixed size and opacity."""
     ix, iy = int(x), int(y)
 
@@ -404,7 +407,7 @@ def draw_trinket_marker(surface, font, x, y, name, dist):
     dist_off = 15
 
     # --- Name ---
-    name_surf, name_rect = font.render(name, COLOR_TRINKET, size=font_size)
+    name_surf, name_rect = font.render(name, color, size=font_size)
     name_x = ix - name_rect.width // 2
     name_y = iy - name_rect.height // 2
     surface.blit(name_surf, (name_x, name_y))
@@ -583,8 +586,20 @@ def main():
                 t_name = trinket["name"]
                 t_dist = trinket["dist"]
                 
-                if t_dist >= 150.0 and t_name not in IMPORTANT_TRINKETS:
-                    continue
+                t_color = COLOR_TRINKET
+
+                if t_name in ARTIFACT_TRINKETS:
+                    t_color = (255, 50, 50)  # Red for artifacts/rares
+                    if t_name == "Phoenix Down":
+                        t_color = (255, 255, 0)  # Yellow for Phoenix Down
+                    elif t_name == "Ice Essence":
+                        t_color = (100, 200, 255) # Blue for Ice Essence
+                elif t_name in EVENT_TRINKETS:
+                    if t_dist >= 400.0:
+                        continue
+                else:
+                    if t_dist >= 150.0:
+                        continue
 
                 sx, sy, visible = world_to_screen(
                     trinket["pos"], cf, fov, cam_vp[0], cam_vp[1]
@@ -601,8 +616,9 @@ def main():
                 draw_trinket_marker(
                     screen, font,
                     sx, sy,
-                    trinket["name"],
-                    trinket["dist"]
+                    t_name,
+                    t_dist,
+                    t_color
                 )
 
         pygame.display.flip()
