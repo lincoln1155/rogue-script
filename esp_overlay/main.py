@@ -94,6 +94,7 @@ class GameState:
         self.camera = None       # {"cf": [...], "fov": float, "vp": [w, h]}
         self.players = []        # [{"name": str, "pos": [x,y,z], "hp": float, "dist": float}, ...]
         self.trinkets = []       # [{"name": str, "pos": [x,y,z], "dist": float}, ...]
+        self.skills = {}         # {(player_name, skill_name): expire_time_float}
         self.last_update = 0.0
         self.connected = False
 
@@ -119,6 +120,26 @@ class GameState:
 
             self.players = new_players
             self.trinkets = data.get("trinkets", [])
+            
+            # Process skills
+            active_player_names = {p["name"] for p in new_players}
+            new_skills = data.get("skills", [])
+            for sk in new_skills:
+                pname = sk.get("player")
+                sname = sk.get("skill")
+                cd = sk.get("cooldown", 0)
+                if pname and sname:
+                    self.skills[(pname, sname)] = now + cd
+
+            # Cleanup expired or disconnected skills
+            expired_keys = []
+            for k, expire_time in self.skills.items():
+                pname, _ = k
+                if pname not in active_player_names or now > expire_time:
+                    expired_keys.append(k)
+            for k in expired_keys:
+                del self.skills[k]
+
             self.last_update = now
             self.connected = True
 
@@ -435,6 +456,48 @@ def draw_status(surface, font, connected, age):
     text_surf, text_rect = font.render(status_text, status_color)
     surface.blit(text_surf, (10, 10))
 
+def draw_skill_tracker(surface, font, skills):
+    """Draw the active skill cooldowns."""
+    if not skills:
+        return
+
+    now = time.time()
+    
+    # Render title
+    title_surf, title_rect = font.render("Active Skills", (255, 200, 50))
+    x, y = 10, 40
+    
+    # Background Box Dimensions
+    row_height = 15
+    padding = 5
+    box_w = 200
+    box_h = title_rect.height + padding * 3 + len(skills) * row_height
+
+    # Draw solid dark background and border
+    pygame.draw.rect(surface, (30, 30, 30), (x, y, box_w, box_h))
+    pygame.draw.rect(surface, (100, 100, 100), (x, y, box_w, box_h), 1)
+
+    surface.blit(title_surf, (x + padding, y + padding))
+    
+    y_offset = y + title_rect.height + padding * 2
+    
+    # Sort skills by time remaining (lowest first)
+    sorted_skills = sorted(skills.items(), key=lambda item: item[1] - now)
+    
+    for (pname, sname), expire_time in sorted_skills:
+        rem = max(0.0, expire_time - now)
+        mins = int(rem) // 60
+        secs = int(rem) % 60
+        
+        text = f"[{pname}] {sname} - {mins:02d}:{secs:02d}"
+        color = (200, 200, 200)
+        if rem < 10:
+            color = (100, 255, 100) # Ready soon
+            
+        text_surf, _ = font.render(text, color)
+        surface.blit(text_surf, (x + padding, y_offset))
+        y_offset += row_height
+
 # ============================================================
 # MAIN LOOP
 # ============================================================
@@ -535,6 +598,9 @@ def main():
 
         # Draw status indicator
         draw_status(screen, status_font, snapshot["connected"], snapshot["age"])
+
+        # Draw active skills tracker
+        draw_skill_tracker(screen, status_font, snapshot.get("skills", {}))
 
         # Draw ESP markers if we have camera data
         camera = snapshot["camera"]

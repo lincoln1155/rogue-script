@@ -725,6 +725,46 @@ workspace.ChildRemoved:Connect(function(v)
     end
 end)
 
+-- ============================================================
+-- SKILL TRACKER
+-- ============================================================
+
+local CollectionService = game:GetService("CollectionService")
+local pendingSkills = {}
+
+local function queueSkill(player, skillName, cooldown)
+    local pName = getRogueName(player)
+    table.insert(pendingSkills, {
+        player = pName,
+        skill = skillName,
+        cooldown = cooldown
+    })
+    print(string.format("[RogueLite] Tracked %s used %s! Cooldown: %ds", pName, skillName, cooldown))
+end
+
+-- 1. Awakened (KenHaki added to character)
+workspace.DescendantAdded:Connect(function(descendant)
+    if descendant.Name == "KenHaki" then
+        local character = descendant:FindFirstAncestorOfClass("Model")
+        if character then
+            local player = Players:GetPlayerFromCharacter(character)
+            if player then
+                queueSkill(player, "Awakened", 300) -- Defaulting to 5 minutes
+            end
+        end
+    end
+end)
+
+-- 2. Flock (RecentFlock tag added)
+CollectionService:GetInstanceAddedSignal("RecentFlock"):Connect(function(character)
+    if character and character:IsA("Model") then
+        local player = Players:GetPlayerFromCharacter(character)
+        if player then
+            queueSkill(player, "Flock", 25) -- Found exactly 25s in rogue_ui.lua
+        end
+    end
+end)
+
 -- Build the data payload
 local function buildESPPayload()
     local camera = workspace.CurrentCamera
@@ -785,8 +825,12 @@ local function buildESPPayload()
             vp = {vpSize.X, vpSize.Y}
         },
         players = playerList,
-        trinkets = trinketsPayload
+        trinkets = trinketsPayload,
+        skills = pendingSkills
     }
+
+    -- Clear queue after building payload so we don't send duplicates
+    pendingSkills = {}
 
     return payload
 end
